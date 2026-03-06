@@ -1,2 +1,2 @@
-admin: python admin_bot_complete.py
-signal: python signal_bot_upgraded.py
+admin: python railway_admin_bot.py
+signal: python railway_signal_bot.py
