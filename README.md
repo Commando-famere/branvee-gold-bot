@@ -13,3 +13,4 @@ Admin ID: 6980711942
 2. Run admin: python admin_bot.py
 3. Run signal: python signal_bot.py
 # Trigger redeploy
+# Force database reset
