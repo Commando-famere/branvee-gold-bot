@@ -31,7 +31,7 @@ DB_PATH = 'data/branvee.db'
 STICKERS = {
     'BUY': 'CAACAgUAAxkBAAEQrM1pqHn0R0kEa_N26VvUd3ql5z2ALQAC8BAAAuyHeVQNfOSljHlxXToE',
     'SELL': 'CAACAgUAAxkBAAEQrM9pqHn3xrEok5y9PgRla3BDglVNRwACBBIAAyV4VL-svKl04_rUOgQ',
-    'HOLD': 'CAACAgUAAxkBAAEQrNFpqHoAAYs3q4IclmTtzx1bM5jWTmMAAnMVAAJkTHlUfqdnK5jbckQ6BA'
+    'HOLD': 'CAACAgQAAxkBAAEQrqhpqaT-Zy6vciPyDnX7WvazBHOXcwACohwAAvo-SVFwrZEPyu77uDoE'
 }
 
 os.makedirs('data', exist_ok=True)
