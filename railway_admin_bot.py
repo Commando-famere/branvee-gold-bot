@@ -26,7 +26,7 @@ from telegram.ext import (
 # CONFIGURATION
 # ============================================
 
-BOT_TOKEN = os.environ.get('ADMIN_BOT_TOKEN', '8224197116:AAHjEn0mWQVYqZE9JGzBXYBzy8m6C6qp4g4')
+BOT_TOKEN = os.environ.get('ADMIN_BOT_TOKEN', '8673278512:AAEpXTJOPNeTNpnyag7KL61qbqiQ1adWnUM')
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 6980711942))
 DB_PATH = 'data/branvee.db'
 
