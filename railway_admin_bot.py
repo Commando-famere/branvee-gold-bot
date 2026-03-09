@@ -273,7 +273,16 @@ def get_users_menu():
         [InlineKeyboardButton("❌ EXPIRED USERS", callback_data='users_expired')],
         [InlineKeyboardButton("⏸️ SUSPENDED USERS", callback_data='users_suspended')],
         [InlineKeyboardButton("📋 ALL USERS", callback_data='users_all')],
+        [InlineKeyboardButton("⚡ BULK ACTIONS", callback_data='bulk_menu')],
         [InlineKeyboardButton("🔙 MAIN MENU", callback_data='menu_main')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_bulk_menu():
+    keyboard = [
+        [InlineKeyboardButton("⏸️ SUSPEND ALL USERS", callback_data='bulk_suspend_all')],
+        [InlineKeyboardButton("▶️ ACTIVATE ALL USERS", callback_data='bulk_activate_all')],
+        [InlineKeyboardButton("🔙 BACK TO USERS", callback_data='menu_users')]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -435,6 +444,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
     
+    elif data == 'bulk_menu':
+        await query.edit_message_text(
+            "⚡ **BULK ACTIONS**\n\n"
+            "These actions affect ALL users in the database.\n"
+            "Use with caution!",
+            reply_markup=get_bulk_menu(),
+            parse_mode='Markdown'
+        )
+    
     elif data == 'menu_settings':
         await query.edit_message_text(
             "⚙️ **SETTINGS**\n\nSelect user management action:",
@@ -475,6 +493,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Activate User - Restore access\n"
             "• Delete User - Remove user\n"
             "• Edit Expiry - Change expiry date\n\n"
+            "**BULK ACTIONS**\n"
+            "• Suspend All - Block all users\n"
+            "• Activate All - Restore all users\n\n"
             "**EXPIRY OPTIONS**\n"
             "Hours, Days, Weeks, Months, Years, or Free"
         )
@@ -555,7 +576,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'dur_free':
         context.user_data['duration_amount'] = 0
         context.user_data['duration_unit'] = 'free'
-        await show_add_confirmation(query, context)
+        # Check if this is for renewal or new user
+        if 'edit_user_id' in context.user_data:
+            await show_renew_confirmation(query, context)
+        else:
+            await show_add_confirmation(query, context)
     
     elif data.startswith('hour_') or data.startswith('day_') or data.startswith('week_') or \
          data.startswith('month_') or data.startswith('year_'):
@@ -563,7 +588,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = data.split('_')
         amount = int(parts[1])
         context.user_data['duration_amount'] = amount
-        await show_add_confirmation(query, context)
+        
+        # FIXED: Check if this is for renewal or new user
+        if 'edit_user_id' in context.user_data:
+            await show_renew_confirmation(query, context)
+        else:
+            await show_add_confirmation(query, context)
     
     elif data == 'dur_custom':
         await query.edit_message_text(
@@ -574,14 +604,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # ========== CONFIRMATION ==========
     elif data == 'confirm_yes':
-        await complete_add_user(query, context)
+        # Check if this is a renewal or new user
+        if 'edit_user_id' in context.user_data:
+            await complete_renew_user(query, context)
+        else:
+            await complete_add_user(query, context)
     
     elif data == 'confirm_edit':
-        await query.edit_message_text(
-            "➕ **ADD USER**\n\nEnter user's email address:",
-            parse_mode='Markdown'
-        )
-        return EMAIL_INPUT
+        if 'edit_user_id' in context.user_data:
+            # Return to renewal flow
+            await query.edit_message_text(
+                "🔄 **RENEW USER**\n\nSelect new duration type:",
+                reply_markup=get_duration_type_menu(),
+                parse_mode='Markdown'
+            )
+        else:
+            await query.edit_message_text(
+                "➕ **ADD USER**\n\nEnter user's email address:",
+                parse_mode='Markdown'
+            )
+            return EMAIL_INPUT
     
     elif data == 'confirm_cancel':
         await query.edit_message_text(
@@ -597,12 +639,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data.startswith('renew_'):
         user_id = int(data.split('_')[1])
-        context.user_data['edit_user_id'] = user_id
-        await query.edit_message_text(
-            "🔄 **RENEW USER**\n\nSelect new duration type:",
-            reply_markup=get_duration_type_menu(),
-            parse_mode='Markdown'
-        )
+        user = get_user_by_id(user_id)
+        if user:
+            context.user_data['edit_user_id'] = user_id
+            context.user_data['edit_user_email'] = user['email']
+            await query.edit_message_text(
+                f"🔄 **RENEW USER**\n\n"
+                f"📧 **Email:** {user['email']}\n"
+                f"Current expiry: {user['expires_at'][:10]}\n\n"
+                f"Select new duration type:",
+                reply_markup=get_duration_type_menu(),
+                parse_mode='Markdown'
+            )
     
     elif data.startswith('suspend_'):
         user_id = int(data.split('_')[1])
@@ -630,17 +678,88 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data.startswith('editexpiry_'):
         user_id = int(data.split('_')[1])
-        context.user_data['edit_user_id'] = user_id
-        await query.edit_message_text(
-            "📝 **EDIT EXPIRY**\n\nSelect new duration type:",
-            reply_markup=get_duration_type_menu(),
-            parse_mode='Markdown'
-        )
+        user = get_user_by_id(user_id)
+        if user:
+            context.user_data['edit_user_id'] = user_id
+            context.user_data['edit_user_email'] = user['email']
+            await query.edit_message_text(
+                f"📝 **EDIT EXPIRY**\n\n"
+                f"📧 **Email:** {user['email']}\n"
+                f"Current expiry: {user['expires_at'][:10]}\n\n"
+                f"Select new duration type:",
+                reply_markup=get_duration_type_menu(),
+                parse_mode='Markdown'
+            )
     
     elif data == 'back_to_users':
         await query.edit_message_text(
             "👥 **USER MANAGEMENT**",
             reply_markup=get_users_menu(),
+            parse_mode='Markdown'
+        )
+    
+    # ========== BULK ACTIONS ==========
+    elif data == 'bulk_suspend_all':
+        keyboard = [
+            [InlineKeyboardButton("✅ YES, SUSPEND ALL", callback_data='bulk_suspend_confirm')],
+            [InlineKeyboardButton("❌ NO, CANCEL", callback_data='back_to_users')]
+        ]
+        await query.edit_message_text(
+            "⚠️ **WARNING** ⚠️\n\n"
+            "This will suspend ALL users in the database.\n"
+            "They will not be able to access the bot.\n\n"
+            "Are you ABSOLUTELY sure?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    
+    elif data == 'bulk_activate_all':
+        keyboard = [
+            [InlineKeyboardButton("✅ YES, ACTIVATE ALL", callback_data='bulk_activate_confirm')],
+            [InlineKeyboardButton("❌ NO, CANCEL", callback_data='back_to_users')]
+        ]
+        await query.edit_message_text(
+            "⚠️ **WARNING** ⚠️\n\n"
+            "This will activate ALL users in the database.\n"
+            "All suspended accounts will be restored.\n\n"
+            "Are you sure?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    
+    elif data == 'bulk_suspend_confirm':
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('UPDATE users SET is_suspended = 1')
+        count = c.rowcount
+        conn.commit()
+        conn.close()
+        
+        await query.edit_message_text(
+            f"✅ **BULK ACTION COMPLETE**\n\n"
+            f"Successfully suspended **{count}** users.\n"
+            f"All accounts are now suspended.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("👥 BACK TO USERS", callback_data='menu_users')
+            ]]),
+            parse_mode='Markdown'
+        )
+    
+    elif data == 'bulk_activate_confirm':
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('UPDATE users SET is_suspended = 0')
+        count = c.rowcount
+        conn.commit()
+        conn.close()
+        
+        await query.edit_message_text(
+            f"✅ **BULK ACTION COMPLETE**\n\n"
+            f"Successfully activated **{count}** users.\n"
+            f"All accounts are now active.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("👥 BACK TO USERS", callback_data='menu_users')
+            ]]),
             parse_mode='Markdown'
         )
 
@@ -741,6 +860,46 @@ async def show_add_confirmation(query, context):
         parse_mode='Markdown'
     )
 
+async def show_renew_confirmation(query, context):
+    user_id = context.user_data.get('edit_user_id')
+    email = context.user_data.get('edit_user_email')
+    unit = context.user_data.get('duration_unit', 'days')
+    amount = context.user_data.get('duration_amount', 30)
+    
+    # Debug print to see what's in context
+    print(f"Renew confirmation - User ID: {user_id}, Email: {email}, Unit: {unit}, Amount: {amount}")
+    
+    if not email and user_id:
+        # If email is missing, try to get it from database
+        user = get_user_by_id(user_id)
+        if user:
+            email = user['email']
+            context.user_data['edit_user_email'] = email
+            print(f"Retrieved email from DB: {email}")
+    
+    if unit == 'free':
+        expiry = "No expiry (free)"
+        expiry_date = "2099-12-31"
+    else:
+        expiry_date = calculate_expiry(amount, unit)
+        expiry = expiry_date.strftime('%Y-%m-%d')
+    
+    context.user_data['new_expiry_date'] = expiry_date.isoformat() if unit != 'free' else '2099-12-31T00:00:00'
+    
+    msg = (
+        f"🔄 **RENEW USER**\n\n"
+        f"📧 **Email:** {email}\n"
+        f"⏳ **New Duration:** {amount} {unit if unit != 'free' else 'free'}\n"
+        f"📅 **New Expiry:** {expiry}\n\n"
+        f"Confirm renewal?"
+    )
+    
+    await query.edit_message_text(
+        msg,
+        reply_markup=get_confirmation_menu(),
+        parse_mode='Markdown'
+    )
+
 async def complete_add_user(query, context):
     email = context.user_data.get('email')
     expiry_date = context.user_data.get('expiry_date')
@@ -761,6 +920,26 @@ async def complete_add_user(query, context):
     
     await query.edit_message_text(
         msg,
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("👥 BACK TO USERS", callback_data='menu_users')
+        ]]),
+        parse_mode='Markdown'
+    )
+    
+    context.user_data.clear()
+
+async def complete_renew_user(query, context):
+    user_id = context.user_data.get('edit_user_id')
+    email = context.user_data.get('edit_user_email')
+    new_expiry = context.user_data.get('new_expiry_date')
+    
+    update_user_expiry(user_id, new_expiry)
+    
+    await query.edit_message_text(
+        f"✅ **USER RENEWED SUCCESSFULLY**\n\n"
+        f"📧 **Email:** {email}\n"
+        f"📅 **New Expiry:** {new_expiry[:10]}\n\n"
+        f"User's access has been extended.",
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("👥 BACK TO USERS", callback_data='menu_users')
         ]]),
@@ -835,7 +1014,12 @@ async def handle_custom_duration(update: Update, context: ContextTypes.DEFAULT_T
         return DURATION_AMOUNT
     
     context.user_data['duration_amount'] = amount
-    await show_add_confirmation(update, context)
+    
+    # Check if this is for renewal or new user
+    if 'edit_user_id' in context.user_data:
+        await show_renew_confirmation(update, context)
+    else:
+        await show_add_confirmation(update, context)
     return ConversationHandler.END
 
 async def show_add_confirmation(update, context):
@@ -851,6 +1035,31 @@ async def show_add_confirmation(update, context):
         f"⏳ **Duration:** {amount} {unit}\n"
         f"📅 **Expires:** {expiry_date.strftime('%Y-%m-%d')}\n\n"
         f"Confirm?",
+        reply_markup=get_confirmation_menu(),
+        parse_mode='Markdown'
+    )
+
+async def show_renew_confirmation(update, context):
+    user_id = context.user_data.get('edit_user_id')
+    email = context.user_data.get('edit_user_email')
+    unit = context.user_data.get('duration_unit', 'days')
+    amount = context.user_data.get('duration_amount', 30)
+    
+    if not email and user_id:
+        user = get_user_by_id(user_id)
+        if user:
+            email = user['email']
+            context.user_data['edit_user_email'] = email
+    
+    expiry_date = calculate_expiry(amount, unit)
+    context.user_data['new_expiry_date'] = expiry_date.isoformat()
+    
+    await update.message.reply_text(
+        f"🔄 **RENEW USER**\n\n"
+        f"📧 **Email:** {email}\n"
+        f"⏳ **New Duration:** {amount} {unit}\n"
+        f"📅 **New Expiry:** {expiry_date.strftime('%Y-%m-%d')}\n\n"
+        f"Confirm renewal?",
         reply_markup=get_confirmation_menu(),
         parse_mode='Markdown'
     )
@@ -916,6 +1125,8 @@ def main():
     print("   • Suspend/Activate/Delete users")
     print("   • Edit expiry dates")
     print("   • View user details with token")
+    print("   • BULK ACTIONS - Suspend/Activate ALL users")
+    print("   • Renew with email confirmation (FIXED)")
     print("="*60 + "\n")
     
     app.run_polling()
