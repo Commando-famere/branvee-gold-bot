@@ -1,5 +1,5 @@
 """
-BRANVEE ADMIN BOT - COMPLETE VERSION
+BRANVEE ADMIN BOT - COMPLETE VERSION WITH FIXED SETTINGS AND BROADCAST
 Full user management with hours/days/weeks/months expiry
 """
 
@@ -26,7 +26,7 @@ from telegram.ext import (
 # CONFIGURATION
 # ============================================
 
-BOT_TOKEN = os.environ.get('ADMIN_BOT_TOKEN', '8673278512:AAEpXTJOPNeTNpnyag7KL61qbqiQ1adWnUM')
+BOT_TOKEN = os.environ.get('ADMIN_BOT_TOKEN', '8224197116:AAHjEn0mWQVYqZE9JGzBXYBzy8m6C6qp4g4')
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 6980711942))
 DB_PATH = 'data/branvee.db'
 
@@ -268,7 +268,8 @@ def validate_email(email):
 
 (EMAIL_INPUT, DURATION_TYPE, DURATION_AMOUNT, CONFIRM_ADD, 
  SEARCH_INPUT, SELECT_USER, EDIT_ACTION, EDIT_EXPIRY,
- MESSAGE_INPUT, MESSAGE_CONFIRM) = range(10)
+ MESSAGE_INPUT, MESSAGE_CONFIRM, RENEW_EMAIL_INPUT, RENEW_DURATION_TYPE, 
+ RENEW_DURATION_AMOUNT, RENEW_CONFIRM) = range(14)
 
 # ============================================
 # KEYBOARDS
@@ -604,109 +605,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # ========== BROADCAST CONFIRMATION ==========
     elif data == 'broadcast_send':
-        broadcast_type = context.user_data.get('broadcast_type')
-        message = context.user_data.get('broadcast_message')
-        
-        if not message:
-            await query.edit_message_text(
-                "❌ No message found. Please try again.",
-                reply_markup=get_back_button()
-            )
-            return
-        
-        await query.edit_message_text("📤 Sending messages...")
-        
-        if broadcast_type == 'all':
-            # Get all users with telegram_id
-            users = get_all_users()
-            sent_count = 0
-            failed_count = 0
-            no_telegram_count = 0
-            
-            for user in users:
-                if user['telegram_id']:
-                    try:
-                        personalized = f"Dear {user['email']},\n\n{message}\n\n---\nBranvee Gold System"
-                        await context.bot.send_message(
-                            chat_id=user['telegram_id'],
-                            text=personalized,
-                            parse_mode='Markdown'
-                        )
-                        sent_count += 1
-                        await asyncio.sleep(0.05)  # Small delay to avoid rate limiting
-                    except Exception as e:
-                        failed_count += 1
-                        print(f"Failed to send to {user['email']} (ID: {user['telegram_id']}): {e}")
-                else:
-                    no_telegram_count += 1
-            
-            await query.edit_message_text(
-                f"✅ **BROADCAST COMPLETE**\n\n"
-                f"📤 **Sent:** {sent_count}\n"
-                f"❌ **Failed:** {failed_count}\n"
-                f"🚫 **No Telegram ID:** {no_telegram_count}\n"
-                f"👥 **Total Users:** {len(users)}",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("👥 BACK TO USERS", callback_data='menu_users')
-                ]]),
-                parse_mode='Markdown'
-            )
-        
-        elif broadcast_type == 'individual':
-            user = context.user_data.get('broadcast_user', {})
-            
-            if not user:
-                await query.edit_message_text(
-                    "❌ No user selected.",
-                    reply_markup=get_back_button()
-                )
-                return
-            
-            if not user.get('telegram_id'):
-                await query.edit_message_text(
-                    f"❌ **Cannot send message**\n\n"
-                    f"📧 **Email:** {user['email']}\n"
-                    f"❌ This user has no Telegram ID linked.\n\n"
-                    f"They need to login to the signal bot first.",
-                    reply_markup=get_back_button(),
-                    parse_mode='Markdown'
-                )
-                return
-            
-            try:
-                personalized = f"Dear {user['email']},\n\n{message}\n\n---\nBranvee Gold System"
-                await context.bot.send_message(
-                    chat_id=user['telegram_id'],
-                    text=personalized,
-                    parse_mode='Markdown'
-                )
-                
-                await query.edit_message_text(
-                    f"✅ **MESSAGE SENT**\n\n"
-                    f"📧 **To:** {user['email']}\n"
-                    f"🆔 **Telegram ID:** `{user['telegram_id']}`",
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("👥 BACK TO USERS", callback_data='menu_users')
-                    ]]),
-                    parse_mode='Markdown'
-                )
-            except Exception as e:
-                await query.edit_message_text(
-                    f"❌ **Failed to send**\n\n"
-                    f"📧 **To:** {user['email']}\n"
-                    f"Error: {str(e)}",
-                    reply_markup=get_back_button()
-                )
-        
-        context.user_data.clear()
+        # This is now handled by handle_message_confirm
+        pass
     
     elif data == 'broadcast_edit':
-        await query.edit_message_text(
-            "✏️ **EDIT MESSAGE**\n\n"
-            "Type your new message:",
-            parse_mode='Markdown'
-        )
-        return MESSAGE_INPUT
+        # This is now handled by handle_message_confirm
+        pass
     
     # ========== ADD USER FLOW ==========
     elif data == 'users_add':
@@ -811,6 +715,48 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         context.user_data.clear()
     
+    # ========== SETTINGS MENU ACTIONS ==========
+    elif data == 'settings_renew':
+        await query.edit_message_text(
+            "🔄 **RENEW USER**\n\n"
+            "Enter the email address of the user to renew:",
+            parse_mode='Markdown'
+        )
+        return RENEW_EMAIL_INPUT
+    
+    elif data == 'settings_suspend':
+        await query.edit_message_text(
+            "⏸️ **SUSPEND USER**\n\n"
+            "Enter the email address of the user to suspend:",
+            parse_mode='Markdown'
+        )
+        return RENEW_EMAIL_INPUT
+    
+    elif data == 'settings_activate':
+        await query.edit_message_text(
+            "▶️ **ACTIVATE USER**\n\n"
+            "Enter the email address of the user to activate:",
+            parse_mode='Markdown'
+        )
+        return RENEW_EMAIL_INPUT
+    
+    elif data == 'settings_delete':
+        await query.edit_message_text(
+            "❌ **DELETE USER**\n\n"
+            "⚠️ **WARNING:** This action cannot be undone!\n\n"
+            "Enter the email address of the user to delete:",
+            parse_mode='Markdown'
+        )
+        return RENEW_EMAIL_INPUT
+    
+    elif data == 'settings_edit_expiry':
+        await query.edit_message_text(
+            "📝 **EDIT EXPIRY**\n\n"
+            "Enter the email address of the user to edit:",
+            parse_mode='Markdown'
+        )
+        return RENEW_EMAIL_INPUT
+    
     # ========== USER ACTIONS ==========
     elif data.startswith('view_'):
         user_id = int(data.split('_')[1])
@@ -834,24 +780,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith('suspend_'):
         user_id = int(data.split('_')[1])
         suspend_user(user_id)
+        user = get_user_by_id(user_id)
         await query.edit_message_text(
-            "✅ User suspended successfully.",
+            f"✅ **User Suspended**\n\n"
+            f"📧 **Email:** {user['email']}\n"
+            f"User can no longer access the signal bot.",
             reply_markup=get_back_button()
         )
     
     elif data.startswith('activate_'):
         user_id = int(data.split('_')[1])
         activate_user(user_id)
+        user = get_user_by_id(user_id)
         await query.edit_message_text(
-            "✅ User activated successfully.",
+            f"✅ **User Activated**\n\n"
+            f"📧 **Email:** {user['email']}\n"
+            f"User can now access the signal bot.",
             reply_markup=get_back_button()
         )
     
     elif data.startswith('delete_'):
         user_id = int(data.split('_')[1])
+        user = get_user_by_id(user_id)
+        email = user['email'] if user else "Unknown"
         delete_user(user_id)
         await query.edit_message_text(
-            "✅ User deleted successfully.",
+            f"✅ **User Deleted**\n\n"
+            f"📧 **Email:** {email}\n"
+            f"User has been permanently removed.",
             reply_markup=get_back_button()
         )
     
@@ -878,7 +834,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(
                     f"📱 **TELEGRAM ID**\n\n"
                     f"📧 **Email:** {user['email']}\n"
-                    f"🆔 **Telegram ID:** `{user['telegram_id']}`",
+                    f"🆔 **Telegram ID:** `{user['telegram_id']}`\n\n"
+                    f"This user can receive messages.",
                     reply_markup=get_user_action_menu(user_id),
                     parse_mode='Markdown'
                 )
@@ -887,7 +844,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"📱 **TELEGRAM ID**\n\n"
                     f"📧 **Email:** {user['email']}\n"
                     f"❌ No Telegram ID linked yet.\n\n"
-                    f"User needs to login to signal bot first.",
+                    f"User needs to login to signal bot first.\n"
+                    f"Once they login, their Telegram ID will appear here.",
                     reply_markup=get_user_action_menu(user_id),
                     parse_mode='Markdown'
                 )
@@ -1228,6 +1186,10 @@ async def handle_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     return ConversationHandler.END
 
+# ============================================
+# BROADCAST MESSAGE HANDLERS - FIXED
+# ============================================
+
 async def handle_message_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle broadcast message input"""
     message = update.message.text.strip()
@@ -1244,31 +1206,189 @@ async def handle_message_input(update: Update, context: ContextTypes.DEFAULT_TYP
     if broadcast_type == 'individual':
         user = context.user_data.get('broadcast_user', {})
         email = user.get('email', 'user')
+        
+        # Check if user has Telegram ID
+        telegram_status = "✅ HAS TELEGRAM" if user.get('telegram_id') else "❌ NO TELEGRAM"
+        
         preview = (
             f"📝 **MESSAGE PREVIEW**\n\n"
-            f"To: {email}\n\n"
+            f"👤 **To:** {email}\n"
+            f"📱 **Status:** {telegram_status}\n"
+            f"🆔 **Telegram ID:** `{user.get('telegram_id', 'None')}`\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"Dear {email},\n\n"
             f"{message}\n\n"
             f"---\n"
-            f"Branvee Gold System"
+            f"Branvee Gold System\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Send this message?"
         )
     else:
         preview = (
             f"📝 **MESSAGE PREVIEW**\n\n"
-            f"To: ALL USERS\n\n"
+            f"👥 **To:** ALL USERS\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"Dear [email],\n\n"
             f"{message}\n\n"
             f"---\n"
-            f"Branvee Gold System"
+            f"Branvee Gold System\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Send this message?"
         )
     
+    # Send preview with confirmation buttons
     await update.message.reply_text(
-        f"{preview}\n\n"
-        f"Send this message?",
+        preview,
         reply_markup=get_broadcast_confirmation_menu(),
         parse_mode='Markdown'
     )
+    
+    # Important: Return MESSAGE_CONFIRM to stay in conversation
     return MESSAGE_CONFIRM
+
+async def handle_message_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the confirmation of broadcast message"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    
+    if data == 'broadcast_send':
+        broadcast_type = context.user_data.get('broadcast_type')
+        message = context.user_data.get('broadcast_message')
+        
+        if not message:
+            await query.edit_message_text(
+                "❌ No message found. Please try again.",
+                reply_markup=get_back_button()
+            )
+            return ConversationHandler.END
+        
+        await query.edit_message_text("📤 Sending messages...")
+        
+        if broadcast_type == 'all':
+            # Get users with telegram_id
+            users_with_telegram = get_users_with_telegram()
+            all_users = get_all_users()
+            
+            if not users_with_telegram:
+                await query.edit_message_text(
+                    "❌ **No users with Telegram ID found**\n\n"
+                    f"Total users in database: {len(all_users)}\n"
+                    f"Users with Telegram: 0\n\n"
+                    f"Users need to login to the signal bot first to link their Telegram.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("👥 BACK TO USERS", callback_data='menu_users')
+                    ]]),
+                    parse_mode='Markdown'
+                )
+                context.user_data.clear()
+                return ConversationHandler.END
+            
+            sent_count = 0
+            failed_count = 0
+            failed_details = []
+            
+            for user in users_with_telegram:
+                try:
+                    personalized = f"Dear {user['email']},\n\n{message}\n\n---\nBranvee Gold System"
+                    await context.bot.send_message(
+                        chat_id=user['telegram_id'],
+                        text=personalized
+                    )
+                    sent_count += 1
+                    await asyncio.sleep(0.05)
+                except Exception as e:
+                    failed_count += 1
+                    failed_details.append(f"{user['email']}: {str(e)}")
+                    print(f"Failed to send to {user['email']}: {e}")
+            
+            result_msg = (
+                f"✅ **BROADCAST COMPLETE**\n\n"
+                f"📤 **Sent:** {sent_count}\n"
+                f"❌ **Failed:** {failed_count}\n"
+                f"📱 **Users with Telegram:** {len(users_with_telegram)}\n"
+                f"👥 **Total Users:** {len(all_users)}"
+            )
+            
+            if failed_details and len(failed_details) <= 3:
+                result_msg += "\n\n**Failed details:**\n" + "\n".join(failed_details)
+            
+            await query.edit_message_text(
+                result_msg,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("👥 BACK TO USERS", callback_data='menu_users')
+                ]]),
+                parse_mode='Markdown'
+            )
+        
+        elif broadcast_type == 'individual':
+            user = context.user_data.get('broadcast_user', {})
+            
+            if not user:
+                await query.edit_message_text(
+                    "❌ No user selected.",
+                    reply_markup=get_back_button()
+                )
+                return ConversationHandler.END
+            
+            if not user.get('telegram_id'):
+                await query.edit_message_text(
+                    f"❌ **Cannot send message**\n\n"
+                    f"📧 **Email:** {user['email']}\n"
+                    f"❌ This user has no Telegram ID linked.\n\n"
+                    f"They need to login to the signal bot first.",
+                    reply_markup=get_back_button(),
+                    parse_mode='Markdown'
+                )
+                return ConversationHandler.END
+            
+            try:
+                personalized = f"Dear {user['email']},\n\n{message}\n\n---\nBranvee Gold System"
+                await context.bot.send_message(
+                    chat_id=user['telegram_id'],
+                    text=personalized
+                )
+                
+                await query.edit_message_text(
+                    f"✅ **MESSAGE SENT**\n\n"
+                    f"📧 **To:** {user['email']}\n"
+                    f"🆔 **Telegram ID:** `{user['telegram_id']}`\n\n"
+                    f"Message delivered successfully!",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("👥 BACK TO USERS", callback_data='menu_users')
+                    ]]),
+                    parse_mode='Markdown'
+                )
+            except Exception as e:
+                await query.edit_message_text(
+                    f"❌ **Failed to send**\n\n"
+                    f"📧 **To:** {user['email']}\n"
+                    f"Error: {str(e)}",
+                    reply_markup=get_back_button()
+                )
+        
+        context.user_data.clear()
+        return ConversationHandler.END
+    
+    elif data == 'broadcast_edit':
+        await query.edit_message_text(
+            "✏️ **EDIT MESSAGE**\n\n"
+            "Type your new message:",
+            parse_mode='Markdown'
+        )
+        return MESSAGE_INPUT
+    
+    elif data == 'bulk_menu':
+        await query.edit_message_text(
+            "⚡ **BULK ACTIONS**",
+            reply_markup=get_bulk_menu(),
+            parse_mode='Markdown'
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+    
+    return ConversationHandler.END
 
 async def handle_custom_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -1330,6 +1450,44 @@ async def show_renew_confirmation(update, context):
         parse_mode='Markdown'
     )
 
+# ============================================
+# SETTINGS MESSAGE HANDLERS
+# ============================================
+
+async def handle_renew_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle email input for settings actions"""
+    email = update.message.text.strip()
+    user = get_user_by_email(email)
+    
+    if not user:
+        await update.message.reply_text(
+            "❌ User not found with that email.",
+            reply_markup=get_back_button()
+        )
+        return ConversationHandler.END
+    
+    # Store user info
+    context.user_data['action_user_id'] = user['id']
+    context.user_data['action_user_email'] = user['email']
+    
+    # Show user info
+    await update.message.reply_text(
+        f"👤 **User Found**\n\n"
+        f"📧 **Email:** {user['email']}\n"
+        f"📊 **Status:** {'✅ Active' if not user['is_suspended'] else '⏸️ Suspended'}\n"
+        f"📅 **Expires:** {user['expires_at'][:10]}\n"
+        f"📱 **Telegram:** {'✅ Linked' if user['telegram_id'] else '❌ Not Linked'}\n\n"
+        f"Return to settings menu to perform actions.",
+        reply_markup=get_settings_menu(),
+        parse_mode='Markdown'
+    )
+    
+    return ConversationHandler.END
+
+# ============================================
+# CANCEL
+# ============================================
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Operation cancelled.")
     context.user_data.clear()
@@ -1377,24 +1535,42 @@ def main():
     )
     app.add_handler(custom_conv)
     
-    # Conversation handler for broadcast message
+    # Conversation handler for broadcast message - FIXED
     broadcast_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(button_handler, pattern='^broadcast_(all|individual)$')],
         states={
             MESSAGE_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message_input)],
-            MESSAGE_CONFIRM: [CallbackQueryHandler(button_handler, pattern='^(broadcast_send|broadcast_edit)$')],
+            MESSAGE_CONFIRM: [CallbackQueryHandler(handle_message_confirm, pattern='^(broadcast_send|broadcast_edit|bulk_menu)$')],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+        allow_reentry=True,
+        per_message=False
+    )
+    app.add_handler(broadcast_conv)
+    
+    # Conversation handler for settings renew
+    renew_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(button_handler, pattern='^settings_renew$'),
+            CallbackQueryHandler(button_handler, pattern='^settings_suspend$'),
+            CallbackQueryHandler(button_handler, pattern='^settings_activate$'),
+            CallbackQueryHandler(button_handler, pattern='^settings_delete$'),
+            CallbackQueryHandler(button_handler, pattern='^settings_edit_expiry$')
+        ],
+        states={
+            RENEW_EMAIL_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_renew_email_input)],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
         allow_reentry=True
     )
-    app.add_handler(broadcast_conv)
+    app.add_handler(renew_conv)
     
     # Main handlers
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CallbackQueryHandler(button_handler))
     
     print("\n" + "="*60)
-    print("🤖 BRANVEE ADMIN BOT - COMPLETE VERSION")
+    print("🤖 BRANVEE ADMIN BOT - COMPLETE FIXED VERSION")
     print("="*60)
     print("✅ Features loaded:")
     print("   • Hours/Days/Weeks/Months/Years/Free expiry")
@@ -1407,7 +1583,9 @@ def main():
     print("   • BULK ACTIONS - Suspend/Activate ALL users")
     print("   • BROADCAST - Send messages to users (individual or all)")
     print("   • Messages go to user's linked Telegram")
-    print("   • Renew with email confirmation (FIXED)")
+    print("   • SETTINGS BUTTONS - Renew/Suspend/Activate/Delete/Edit")
+    print("   • Shows users with/without Telegram")
+    print("   • INDIVIDUAL MESSAGES - Fixed confirmation flow")
     print("="*60 + "\n")
     
     app.run_polling()
