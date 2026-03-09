@@ -6,8 +6,9 @@ Professional flow with login button and clean interface
 import logging
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
+import pytz  # Added for timezone handling
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -23,7 +24,7 @@ from telegram.ext import (
 # CONFIGURATION
 # ============================================
 
-BOT_TOKEN = os.environ.get('SIGNAL_BOT_TOKEN', '8544864733:AAGp83zQBMrgbnDWHen0MLWxx-xDk26MtSQ')
+BOT_TOKEN = os.environ.get('SIGNAL_BOT_TOKEN', '8224197116:AAHjEn0mWQVYqZE9JGzBXYBzy8m6C6qp4g4')
 API_URL = os.environ.get('RAILWAY_API_URL', 'https://branvee-gold-system-production.up.railway.app')
 DB_PATH = 'data/branvee.db'
 
@@ -35,6 +36,130 @@ STICKERS = {
 }
 
 os.makedirs('data', exist_ok=True)
+
+# ============================================
+# MARKET HOURS FILTER
+# ============================================
+
+def is_market_open():
+    """Check if gold market is currently open"""
+    # Get current time in GMT
+    gmt_tz = pytz.timezone('GMT')
+    now = datetime.now(gmt_tz)
+    
+    # Get day of week (0=Monday, 6=Sunday)
+    day = now.weekday()
+    hour = now.hour
+    
+    # Market closed: Friday 22:00 GMT to Sunday 23:00 GMT
+    if day == 4:  # Friday
+        if hour >= 22:  # 22:00 or later
+            return False
+    elif day == 5:  # Saturday
+        return False
+    elif day == 6:  # Sunday
+        if hour < 23:  # Before 23:00
+            return False
+    
+    return True
+
+def get_market_closed_message():
+    """Get styled market closed message"""
+    gmt_tz = pytz.timezone('GMT')
+    now = datetime.now(gmt_tz)
+    
+    # Calculate next open time
+    if now.weekday() == 4 and now.hour >= 22:  # Friday after 22:00
+        next_open = now + timedelta(days=2)  # Sunday
+        next_open = next_open.replace(hour=23, minute=0, second=0, microsecond=0)
+    elif now.weekday() == 5:  # Saturday
+        days_until_sunday = 1
+        next_open = now + timedelta(days=days_until_sunday)
+        next_open = next_open.replace(hour=23, minute=0, second=0, microsecond=0)
+    elif now.weekday() == 6 and now.hour < 23:  # Sunday before 23:00
+        next_open = now.replace(hour=23, minute=0, second=0, microsecond=0)
+    else:
+        next_open = now + timedelta(hours=1)  # Fallback
+    
+    # Format time remaining
+    time_remaining = next_open - now
+    hours = int(time_remaining.total_seconds() // 3600)
+    minutes = int((time_remaining.total_seconds() % 3600) // 60)
+    
+    # Styled message with box drawing characters
+    message = (
+        "╔══════════════════════════════╗\n"
+        "║     🚫 MARKET CLOSED 🚫      ║\n"
+        "╠══════════════════════════════╣\n"
+        "║ Gold market is currently     ║\n"
+        "║ closed for the weekend.      ║\n"
+        "║                              ║\n"
+        "║ 📅 Next Open:                 ║\n"
+        f"║    {next_open.strftime('%A %H:%M')} GMT   ║\n"
+        "║                              ║\n"
+        f"║ ⏳ Time remaining:            ║\n"
+        f"║    {hours}h {minutes}m        ║\n"
+        "╚══════════════════════════════╝\n\n"
+        "💤 Please check back when market opens."
+    )
+    
+    return message
+
+# ============================================
+# ACCOUNT STATUS CHECK
+# ============================================
+
+async def check_account_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Check if user account is active, if not force re-login"""
+    user_id = update.effective_user.id
+    
+    # Check if user is in session
+    if 'user_id' not in context.user_data:
+        return False
+    
+    db_user = get_user_by_id(context.user_data['user_id'])
+    
+    # If user not found in DB or was deleted
+    if not db_user:
+        await force_relogin(update, context, "Account not found. Please login again.")
+        return False
+    
+    # Check if suspended
+    if db_user['is_suspended'] == 1:
+        await force_relogin(update, context, "Your account has been suspended. Please contact admin and login again.")
+        return False
+    
+    # Check if expired
+    now = datetime.now().isoformat()
+    if db_user['expires_at'] < now:
+        await force_relogin(update, context, "Your subscription has expired. Please renew and login again.")
+        return False
+    
+    return True
+
+async def force_relogin(update: Update, context: ContextTypes.DEFAULT_TYPE, message: str):
+    """Force user to re-login by clearing session and showing login button"""
+    # Clear user session
+    context.user_data.clear()
+    
+    # Show login button
+    keyboard = [[InlineKeyboardButton("🔐 LOGIN TO YOUR ACCOUNT", callback_data='start_login')]]
+    
+    # Handle both callback queries and direct messages
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            f"⚠️ **{message}**\n\n"
+            f"Please login again to continue.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text(
+            f"⚠️ **{message}**\n\n"
+            f"Please login again to continue.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
 
 # ============================================
 # DATABASE FUNCTIONS
@@ -300,6 +425,10 @@ async def account_info_callback(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
     
+    # Check account status first
+    if not await check_account_status(update, context):
+        return
+    
     user_id = context.user_data.get('user_id')
     if not user_id:
         await query.edit_message_text("Session expired. Please /start again.")
@@ -366,6 +495,21 @@ async def signal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle get signal button"""
     query = update.callback_query
     await query.answer()
+    
+    # Check if market is open
+    if not is_market_open():
+        closed_message = get_market_closed_message()
+        keyboard = [[InlineKeyboardButton("🏠 HOME", callback_data='home_menu')]]
+        await query.edit_message_text(
+            closed_message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        return
+    
+    # Check account status
+    if not await check_account_status(update, context):
+        return
     
     user_id = context.user_data.get('user_id')
     if not user_id:
@@ -511,6 +655,8 @@ def main():
     print("   • Time remaining (days/hours/minutes)")
     print("   • Stickers for BUY/SELL/HOLD")
     print("   • GET SIGNAL button after each signal")
+    print("   • MARKET HOURS - Shows closed on weekends")
+    print("   • AUTO RE-LOGIN - For suspended/expired accounts")
     print("="*60 + "\n")
     
     app.run_polling()
