@@ -25,7 +25,7 @@ from telegram.ext import (
 # CONFIGURATION
 # ============================================
 
-BOT_TOKEN = os.environ.get('SIGNAL_BOT_TOKEN', '8381499817:AAF4Aow7qa8JVRQ3WJrSoqH5D-DSt-FuljU')
+BOT_TOKEN = os.environ.get('SIGNAL_BOT_TOKEN', '8544864733:AAGp83zQBMrgbnDWHen0MLWxx-xDk26MtSQ')
 API_URL = os.environ.get('RAILWAY_API_URL', 'https://branvee-gold-system-production.up.railway.app')
 DB_PATH = 'data/branvee.db'
 ADMIN_ID = 6980711942  # Your admin ID - add this
