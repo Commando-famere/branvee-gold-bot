@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import random
 import string
 import re
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -39,12 +40,12 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    # Users table
+    # Users table with UNIQUE constraint on telegram_id to prevent multiple links
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE NOT NULL,
         token TEXT UNIQUE NOT NULL,
-        telegram_id INTEGER,
+        telegram_id INTEGER UNIQUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         expires_at TIMESTAMP NOT NULL,
         is_suspended BOOLEAN DEFAULT 0,
@@ -113,6 +114,14 @@ def get_user_by_id(user_id):
     conn.close()
     return user
 
+def get_user_by_telegram(telegram_id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM users WHERE telegram_id = ?', (telegram_id,))
+    user = c.fetchone()
+    conn.close()
+    return user
+
 def get_all_users():
     conn = get_db()
     c = conn.cursor()
@@ -152,6 +161,14 @@ def get_suspended_users():
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT * FROM users WHERE is_suspended = 1 ORDER BY created_at DESC')
+    users = c.fetchall()
+    conn.close()
+    return users
+
+def get_users_with_telegram():
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM users WHERE telegram_id IS NOT NULL ORDER BY created_at DESC')
     users = c.fetchall()
     conn.close()
     return users
@@ -274,6 +291,7 @@ def get_users_menu():
         [InlineKeyboardButton("❌ EXPIRED USERS", callback_data='users_expired')],
         [InlineKeyboardButton("⏸️ SUSPENDED USERS", callback_data='users_suspended')],
         [InlineKeyboardButton("📋 ALL USERS", callback_data='users_all')],
+        [InlineKeyboardButton("📱 LINKED USERS", callback_data='users_linked')],
         [InlineKeyboardButton("⚡ BULK ACTIONS", callback_data='bulk_menu')],
         [InlineKeyboardButton("🔙 MAIN MENU", callback_data='menu_main')]
     ]
@@ -409,6 +427,7 @@ def get_user_action_menu(user_id):
         [InlineKeyboardButton("▶️ ACTIVATE", callback_data=f'activate_{user_id}')],
         [InlineKeyboardButton("❌ DELETE", callback_data=f'delete_{user_id}')],
         [InlineKeyboardButton("📝 EDIT EXPIRY", callback_data=f'editexpiry_{user_id}')],
+        [InlineKeyboardButton("📱 TELEGRAM ID", callback_data=f'telegram_{user_id}')],
         [InlineKeyboardButton("🔙 BACK", callback_data='back_to_users')]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -504,6 +523,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Active Users - View active users\n"
             "• Expired Users - View expired\n"
             "• Suspended Users - View suspended\n"
+            "• Linked Users - View users with Telegram\n"
             "• All Users - List all users\n\n"
             "**SETTINGS**\n"
             "• Renew User - Extend expiry\n"
@@ -540,6 +560,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'users_suspended':
         users = get_suspended_users()
         await show_user_list(query, users, "SUSPENDED USERS")
+    
+    elif data == 'users_linked':
+        users = get_users_with_telegram()
+        await show_user_list(query, users, "LINKED USERS (Has Telegram)")
     
     elif data == 'users_search':
         await query.edit_message_text(
@@ -597,6 +621,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             users = get_all_users()
             sent_count = 0
             failed_count = 0
+            no_telegram_count = 0
             
             for user in users:
                 if user['telegram_id']:
@@ -611,12 +636,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await asyncio.sleep(0.05)  # Small delay to avoid rate limiting
                     except Exception as e:
                         failed_count += 1
-                        print(f"Failed to send to {user['email']}: {e}")
+                        print(f"Failed to send to {user['email']} (ID: {user['telegram_id']}): {e}")
+                else:
+                    no_telegram_count += 1
             
             await query.edit_message_text(
                 f"✅ **BROADCAST COMPLETE**\n\n"
                 f"📤 **Sent:** {sent_count}\n"
                 f"❌ **Failed:** {failed_count}\n"
+                f"🚫 **No Telegram ID:** {no_telegram_count}\n"
                 f"👥 **Total Users:** {len(users)}",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("👥 BACK TO USERS", callback_data='menu_users')
@@ -626,31 +654,47 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         elif broadcast_type == 'individual':
             user = context.user_data.get('broadcast_user', {})
-            if user and user.get('telegram_id'):
-                try:
-                    personalized = f"Dear {user['email']},\n\n{message}\n\n---\nBranvee Gold System"
-                    await context.bot.send_message(
-                        chat_id=user['telegram_id'],
-                        text=personalized,
-                        parse_mode='Markdown'
-                    )
-                    await query.edit_message_text(
-                        f"✅ **MESSAGE SENT**\n\n"
-                        f"📧 **To:** {user['email']}",
-                        reply_markup=InlineKeyboardMarkup([[
-                            InlineKeyboardButton("👥 BACK TO USERS", callback_data='menu_users')
-                        ]]),
-                        parse_mode='Markdown'
-                    )
-                except Exception as e:
-                    await query.edit_message_text(
-                        f"❌ **Failed to send**\n\n"
-                        f"Error: {str(e)}",
-                        reply_markup=get_back_button()
-                    )
-            else:
+            
+            if not user:
                 await query.edit_message_text(
-                    "❌ User has no Telegram ID linked.",
+                    "❌ No user selected.",
+                    reply_markup=get_back_button()
+                )
+                return
+            
+            if not user.get('telegram_id'):
+                await query.edit_message_text(
+                    f"❌ **Cannot send message**\n\n"
+                    f"📧 **Email:** {user['email']}\n"
+                    f"❌ This user has no Telegram ID linked.\n\n"
+                    f"They need to login to the signal bot first.",
+                    reply_markup=get_back_button(),
+                    parse_mode='Markdown'
+                )
+                return
+            
+            try:
+                personalized = f"Dear {user['email']},\n\n{message}\n\n---\nBranvee Gold System"
+                await context.bot.send_message(
+                    chat_id=user['telegram_id'],
+                    text=personalized,
+                    parse_mode='Markdown'
+                )
+                
+                await query.edit_message_text(
+                    f"✅ **MESSAGE SENT**\n\n"
+                    f"📧 **To:** {user['email']}\n"
+                    f"🆔 **Telegram ID:** `{user['telegram_id']}`",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("👥 BACK TO USERS", callback_data='menu_users')
+                    ]]),
+                    parse_mode='Markdown'
+                )
+            except Exception as e:
+                await query.edit_message_text(
+                    f"❌ **Failed to send**\n\n"
+                    f"📧 **To:** {user['email']}\n"
+                    f"Error: {str(e)}",
                     reply_markup=get_back_button()
                 )
         
@@ -826,6 +870,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='Markdown'
             )
     
+    elif data.startswith('telegram_'):
+        user_id = int(data.split('_')[1])
+        user = get_user_by_id(user_id)
+        if user:
+            if user['telegram_id']:
+                await query.edit_message_text(
+                    f"📱 **TELEGRAM ID**\n\n"
+                    f"📧 **Email:** {user['email']}\n"
+                    f"🆔 **Telegram ID:** `{user['telegram_id']}`",
+                    reply_markup=get_user_action_menu(user_id),
+                    parse_mode='Markdown'
+                )
+            else:
+                await query.edit_message_text(
+                    f"📱 **TELEGRAM ID**\n\n"
+                    f"📧 **Email:** {user['email']}\n"
+                    f"❌ No Telegram ID linked yet.\n\n"
+                    f"User needs to login to signal bot first.",
+                    reply_markup=get_user_action_menu(user_id),
+                    parse_mode='Markdown'
+                )
+    
     elif data == 'back_to_users':
         await query.edit_message_text(
             "👥 **USER MANAGEMENT**",
@@ -912,12 +978,13 @@ async def show_user_list(query, users, title):
     for user in users[:10]:
         status = "✅" if not user['is_suspended'] else "⏸️"
         days = days_until(user['expires_at']) if user['expires_at'] > datetime.now().isoformat() else "Expired"
+        telegram_status = "📱" if user['telegram_id'] else "❌"
         
-        # Show first 10 chars of email
+        # Show first part of email
         email_short = user['email'][:20] + "..." if len(user['email']) > 20 else user['email']
         token_short = user['token'][:15] + "..."
         
-        msg += f"{status} **{email_short}**\n"
+        msg += f"{status} {telegram_status} **{email_short}**\n"
         msg += f"🔑 `{token_short}`\n"
         msg += f"📅 Expires: {user['expires_at'][:10]} ({days} days)\n"
         msg += f"🆔 ID: {user['id']}\n\n"
@@ -948,7 +1015,7 @@ async def show_user_details(query, user_id):
     
     days = days_until(user['expires_at']) if user['expires_at'] > datetime.now().isoformat() else "Expired"
     status = "✅ Active" if not user['is_suspended'] else "⏸️ Suspended"
-    linked = "Yes" if user['telegram_id'] else "No"
+    linked = "✅ Yes" if user['telegram_id'] else "❌ No"
     
     msg = (
         f"👤 **USER DETAILS**\n\n"
@@ -956,6 +1023,7 @@ async def show_user_details(query, user_id):
         f"🔑 **Token:** `{user['token']}`\n"
         f"🆔 **User ID:** {user['id']}\n"
         f"📱 **Telegram Linked:** {linked}\n"
+        f"🆔 **Telegram ID:** `{user['telegram_id'] or 'None'}`\n"
         f"📊 **Status:** {status}\n"
         f"📅 **Expires:** {user['expires_at'][:10]}\n"
         f"⏳ **Days Left:** {days}\n"
@@ -1122,9 +1190,16 @@ async def handle_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE
     if context.user_data.get('broadcast_type') == 'individual':
         user = users[0]
         context.user_data['broadcast_user'] = dict(user)
+        
+        # Show user info with Telegram ID status
+        telegram_status = "✅ Linked" if user['telegram_id'] else "❌ Not Linked"
+        telegram_id_display = user['telegram_id'] if user['telegram_id'] else "None"
+        
         await update.message.reply_text(
             f"👤 **User Found**\n\n"
-            f"📧 Email: {user['email']}\n\n"
+            f"📧 **Email:** {user['email']}\n"
+            f"🆔 **Telegram ID:** `{telegram_id_display}`\n"
+            f"📱 **Status:** {telegram_status}\n\n"
             f"Enter your message for this user:",
             parse_mode='Markdown'
         )
@@ -1136,7 +1211,8 @@ async def handle_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE
     for user in users[:5]:
         days = days_until(user['expires_at']) if user['expires_at'] > datetime.now().isoformat() else "Expired"
         status = "✅" if not user['is_suspended'] else "⏸️"
-        msg += f"{status} **{user['email']}**\n"
+        telegram_status = "📱" if user['telegram_id'] else "❌"
+        msg += f"{status} {telegram_status} **{user['email']}**\n"
         msg += f"🔑 `{user['token']}`\n"
         msg += f"📅 Expires: {user['expires_at'][:10]} ({days} days)\n\n"
     
@@ -1323,12 +1399,14 @@ def main():
     print("✅ Features loaded:")
     print("   • Hours/Days/Weeks/Months/Years/Free expiry")
     print("   • Search users by email/token")
-    print("   • View all/active/expired/suspended users")
+    print("   • View all/active/expired/suspended/linked users")
     print("   • Suspend/Activate/Delete users")
     print("   • Edit expiry dates")
     print("   • View user details with token")
+    print("   • View Telegram ID status")
     print("   • BULK ACTIONS - Suspend/Activate ALL users")
     print("   • BROADCAST - Send messages to users (individual or all)")
+    print("   • Messages go to user's linked Telegram")
     print("   • Renew with email confirmation (FIXED)")
     print("="*60 + "\n")
     
