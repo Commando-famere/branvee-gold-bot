@@ -1,5 +1,5 @@
 """
-BRANVEE ADMIN BOT - COMPLETE VERSION WITH FIXED SETTINGS AND BROADCAST
+BRANVEE ADMIN BOT - COMPLETE VERSION WITH FIXED SEARCH AND SETTINGS
 Full user management with hours/days/weeks/months expiry
 """
 
@@ -1132,7 +1132,12 @@ async def handle_email_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
     return ConversationHandler.END
 
+# ============================================
+# FIXED SEARCH HANDLER - Now shows user settings properly
+# ============================================
+
 async def handle_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle search input - shows user settings menu"""
     search_term = update.message.text.strip()
     
     users = search_users(search_term)
@@ -1144,17 +1149,18 @@ async def handle_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return ConversationHandler.END
     
-    # Check if this is for broadcast or regular search
+    # Check if this is for broadcast (individual message) or regular search
     if context.user_data.get('broadcast_type') == 'individual':
+        # This is for sending an individual message
         user = users[0]
         context.user_data['broadcast_user'] = dict(user)
         
-        # Show user info with Telegram ID status
+        # Show user info with Telegram ID status for broadcast
         telegram_status = "✅ Linked" if user['telegram_id'] else "❌ Not Linked"
         telegram_id_display = user['telegram_id'] if user['telegram_id'] else "None"
         
         await update.message.reply_text(
-            f"👤 **User Found**\n\n"
+            f"👤 **User Found for Broadcast**\n\n"
             f"📧 **Email:** {user['email']}\n"
             f"🆔 **Telegram ID:** `{telegram_id_display}`\n"
             f"📱 **Status:** {telegram_status}\n\n"
@@ -1163,31 +1169,59 @@ async def handle_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return MESSAGE_INPUT
     
-    # Regular search results
-    msg = f"🔍 **Search Results for '{search_term}'**\n\n"
-    
-    for user in users[:5]:
+    # REGULAR SEARCH - Show user list with action buttons (THIS IS THE FIX)
+    if len(users) == 1:
+        # Single user found - show their details directly
+        user = users[0]
         days = days_until(user['expires_at']) if user['expires_at'] > datetime.now().isoformat() else "Expired"
-        status = "✅" if not user['is_suspended'] else "⏸️"
-        telegram_status = "📱" if user['telegram_id'] else "❌"
-        msg += f"{status} {telegram_status} **{user['email']}**\n"
-        msg += f"🔑 `{user['token']}`\n"
-        msg += f"📅 Expires: {user['expires_at'][:10]} ({days} days)\n\n"
-    
-    if len(users) > 5:
-        msg += f"... and {len(users) - 5} more results\n\n"
-    
-    # Show actions for first user
-    await update.message.reply_text(
-        msg + f"Actions for {users[0]['email']}:",
-        reply_markup=get_user_action_menu(users[0]['id']),
-        parse_mode='Markdown'
-    )
+        status = "✅ Active" if not user['is_suspended'] else "⏸️ Suspended"
+        linked = "✅ Yes" if user['telegram_id'] else "❌ No"
+        
+        msg = (
+            f"👤 **USER FOUND**\n\n"
+            f"📧 **Email:** {user['email']}\n"
+            f"🔑 **Token:** `{user['token']}`\n"
+            f"🆔 **ID:** {user['id']}\n"
+            f"📱 **Telegram:** {linked}\n"
+            f"📊 **Status:** {status}\n"
+            f"📅 **Expires:** {user['expires_at'][:10]}\n"
+            f"⏳ **Days Left:** {days}\n\n"
+            f"Select an action:"
+        )
+        
+        await update.message.reply_text(
+            msg,
+            reply_markup=get_user_action_menu(user['id']),
+            parse_mode='Markdown'
+        )
+    else:
+        # Multiple users found - show list with first user's actions as example
+        msg = f"🔍 **Found {len(users)} users for '{search_term}'**\n\n"
+        
+        for i, user in enumerate(users[:5], 1):
+            days = days_until(user['expires_at']) if user['expires_at'] > datetime.now().isoformat() else "Expired"
+            status = "✅" if not user['is_suspended'] else "⏸️"
+            telegram_status = "📱" if user['telegram_id'] else "❌"
+            
+            msg += f"{i}. {status} {telegram_status} **{user['email']}**\n"
+            msg += f"   🆔 ID: {user['id']} | Expires: {user['expires_at'][:10]} ({days})\n\n"
+        
+        if len(users) > 5:
+            msg += f"... and {len(users) - 5} more users\n\n"
+        
+        msg += f"Select a user by ID or search again with more specific term.\n\n"
+        msg += f"Example actions for **{users[0]['email']}**:"
+        
+        await update.message.reply_text(
+            msg,
+            reply_markup=get_user_action_menu(users[0]['id']),
+            parse_mode='Markdown'
+        )
     
     return ConversationHandler.END
 
 # ============================================
-# BROADCAST MESSAGE HANDLERS - FIXED
+# BROADCAST MESSAGE HANDLERS
 # ============================================
 
 async def handle_message_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1574,7 +1608,7 @@ def main():
     print("="*60)
     print("✅ Features loaded:")
     print("   • Hours/Days/Weeks/Months/Years/Free expiry")
-    print("   • Search users by email/token")
+    print("   • 🔍 SEARCH USER - Now shows user settings menu properly")
     print("   • View all/active/expired/suspended/linked users")
     print("   • Suspend/Activate/Delete users")
     print("   • Edit expiry dates")
